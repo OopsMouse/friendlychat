@@ -363,7 +363,7 @@ FriendlyChat.prototype.loadUsers = function() {
   var unsetUser = function(data) {
     this.reloadUsers();
   }.bind(this);
-  this.usersRef.on('child_added', setUser);
+  this.usersRef.on('child_added',   setUser);
   this.usersRef.on('child_changed', setUser);
   this.usersRef.on('child_removed', unsetUser);
 };
@@ -385,8 +385,10 @@ FriendlyChat.USER_TEMPLATE =
         '<span class="pic"></span>' +
         '<span class="name"></span>' +
       '</span>' +
-      '<a class="phone" class="mdl-list__item-secondary-action" href="#"><i class="material-icons">call</i></a>' +
+      '<a class="phone" class="mdl-list__item-secondary-action" href="#"><i class="material-icons"></i></a>' +
     '</div>';
+
+FriendlyChat.CALL_EVENTLISTERS = {}
 
 FriendlyChat.prototype.displayUser = function(uid, name, picUrl, peerId) {
   var div = document.getElementById(uid);
@@ -405,17 +407,36 @@ FriendlyChat.prototype.displayUser = function(uid, name, picUrl, peerId) {
 
   var currentUser = this.auth.currentUser;
   var phoneBtn    = div.querySelector('.phone');
-  if (currentUser && currentUser.uid === uid) {
-    if (phoneBtn) {
-      phoneBtn.remove();
-    }
-  } else {
+
+  if (currentUser && currentUser.uid === uid && phoneBtn) {
+    phoneBtn.remove();
+  }
+
+  if (currentUser && currentUser.uid !== uid && peerId) {
     phoneBtn.setAttribute('id', peerId);
-    if (peerId) {
-      phoneBtn.addEventListener('click', function () {
-        this.callToUser(peerId);
-      }.bind(this));
+
+    if (FriendlyChat.CALL_EVENTLISTERS[uid]) {
+      phoneBtn.removeEventListener('click', FriendlyChat.CALL_EVENTLISTERS[uid]);
     }
+
+    var phoneIcon = phoneBtn.querySelector('.material-icons');
+
+    if (this.peer.connections[peerId]) {
+      phoneIcon.textContent = 'call_end';
+
+      FriendlyChat.CALL_EVENTLISTERS[uid] = function () {
+        this.endCall();
+      }.bind(this);
+
+    } else {
+      phoneIcon.textContent = 'call';
+
+      FriendlyChat.CALL_EVENTLISTERS[uid] = function () {
+        this.callToUser(peerId);
+      }.bind(this);
+    }
+
+    phoneBtn.addEventListener('click', FriendlyChat.CALL_EVENTLISTERS[uid]);
   }
 
   // Show the card fading-in.
@@ -442,8 +463,8 @@ FriendlyChat.prototype.initPeerJs = function() {
       this.peerId = peerId;
       this.saveUser();
     }.bind(this))
-    this.peer.on('call', this.reciveCall.bind(this));
-    this.peer.on('close', this.endPeerJs.bind(this));
+    this.peer.on('call',       this.reciveCall.bind(this));
+    this.peer.on('close',      this.endPeerJs.bind(this));
     this.peer.on('error', function (err) {
       console.error(err);
       this.endPeerJs();
@@ -467,26 +488,48 @@ FriendlyChat.prototype.callToUser = function(peerId) {
     this.initPeerJs();
   }
 
-  this.endCall();
+  if (this.call) {
+    this.endCall();    
+  }
 
   this.call = this.peer.call(peerId, this.mediaStream);
-
   this.call.on('close', this.endCall.bind(this));
   this.call.on('error', function (err) {
     console.error(err);
     this.endCall();
   }.bind(this));
+
+  this.reloadUsers();
+};
+
+FriendlyChat.prototype.getUserByPeerId = function(peerId) {
+  var div  = document.getElementById(peerId);
+  var uid  = div.parentNode.getAttribute('id');
+  var name = div.parentNode.querySelector('.name').textContent;
+  return {
+    uid: uid,
+    name: name,
+    peerId: peerId
+  }
 };
 
 FriendlyChat.prototype.reciveCall = function (call) {
-  if (!this.mediaStream) {
-    return this.initMeidaStream(this.callToUser.bind(this));
+  var user = this.getUserByPeerId(call.peer);
+  var data = {
+    message: 'Calling From ' + user.name,
+    timeout: 6000,
+    actionHandler: function () {
+      this.answerCall(user, call);
+    }.bind(this),
+    actionText: 'Answer'
+  };
+  this.signInSnackbar.MaterialSnackbar.showSnackbar(data);
+};
+
+FriendlyChat.prototype.answerCall = function (user, call) {
+  if (this.call) {
+    this.endCall();
   }
-
-  this.endCall();
-
-  var fromId = call.peer;
-
   this.call = call;
   this.call.answer(this.mediaStream);
   this.call.on('stream', function (stream) {
@@ -496,12 +539,15 @@ FriendlyChat.prototype.reciveCall = function (call) {
     console.error(err);
     this.endCall();
   }.bind(this));
+
+  this.reloadUsers();
 };
 
 FriendlyChat.prototype.endCall = function () {
   if (this.call) {
     this.call.close();
     this.call = null;
+    this.reloadUsers();
   }
 };
 
