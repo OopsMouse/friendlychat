@@ -59,6 +59,9 @@ FriendlyChat.prototype.initFirebase = function() {
     this.storage = firebase.storage();
     // Initiates Firebase auth and listen to auth state changes.
     this.auth.onAuthStateChanged(this.onAuthStateChanged.bind(this));
+    // Listen to online state changes.
+    this.onlineRef = this.database.ref(".info/connected");
+    this.onlineRef.on('value', this.onOnlineState.bind(this));
 };
 
 // Loads chat messages history and listens for upcoming ones.
@@ -292,6 +295,21 @@ FriendlyChat.prototype.checkSetup = function() {
         'You may also need to visit the Storage tab and paste the name of your bucket which is ' +
         'displayed there.');
   }
+};
+
+FriendlyChat.prototype.onOnlineState = function(snap) {
+  var data = {
+    message: null,
+    timeout: 2000
+  };
+  if (snap.val() === true && !this.isOnline) {
+    data.message = 'connected';
+    this.signInSnackbar.MaterialSnackbar.showSnackbar(data);
+  } else if (snap.val() === false && this.isOnline){
+    data.message = 'disconnected';
+    this.signInSnackbar.MaterialSnackbar.showSnackbar(data);
+  }
+  this.isOnline = snap.val();
 };
 
 window.onload = function() {
