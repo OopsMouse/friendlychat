@@ -32,6 +32,7 @@ function FriendlyChat() {
   this.signInButton = document.getElementById('sign-in');
   this.signOutButton = document.getElementById('sign-out');
   this.signInSnackbar = document.getElementById('must-signin-snackbar');
+  this.userList = document.getElementById('users');
 
   // Saves message on form submit.
   this.messageForm.addEventListener('submit', this.saveMessage.bind(this));
@@ -177,7 +178,7 @@ FriendlyChat.prototype.signOut = function() {
 FriendlyChat.prototype.onAuthStateChanged = function(user) {
   if (user) { // User is signed in!
     // Get profile pic and user's name from the Firebase user object.
-    var profilePicUrl = user.photoURL;
+    var profilePicUrl = user.photoURL || '/images/profile_placeholder.png';
     var userName = user.displayName;
 
     // Set the user's profile pic and name.
@@ -194,6 +195,15 @@ FriendlyChat.prototype.onAuthStateChanged = function(user) {
 
     // We load currently existing chant messages.
     this.loadMessages();
+
+    // Initialize PeerJs.
+    this.initPeerJs();
+
+    // Save user.
+    this.saveUser();
+
+    // load current users.
+    this.loadUsers();
   } else { // User is signed out!
     // Hide user's profile and sign-out button.
     this.userName.setAttribute('hidden', 'true');
@@ -202,6 +212,9 @@ FriendlyChat.prototype.onAuthStateChanged = function(user) {
 
     // Show sign-in button.
     this.signInButton.removeAttribute('hidden');
+
+    // End PeerJs
+    this.endPeerJs();
   }
 };
 
@@ -268,8 +281,6 @@ FriendlyChat.prototype.displayMessage = function(key, name, text, picUrl, imageU
   }
   // Show the card fading-in.
   setTimeout(function() {div.classList.add('visible')}, 1);
-  this.messageList.scrollTop = this.messageList.scrollHeight;
-  this.messageInput.focus();
 };
 
 // Enables or disables the submit button depending on the values of the input
@@ -305,11 +316,96 @@ FriendlyChat.prototype.onOnlineState = function(snap) {
   if (snap.val() === true && !this.isOnline) {
     data.message = 'connected';
     this.signInSnackbar.MaterialSnackbar.showSnackbar(data);
+    this.initPeerJs();
+    this.saveUser();
   } else if (snap.val() === false && this.isOnline){
     data.message = 'disconnected';
     this.signInSnackbar.MaterialSnackbar.showSnackbar(data);
+    this.endPeerJs();
   }
   this.isOnline = snap.val();
+};
+
+FriendlyChat.prototype.initPeerJs = function() {
+  if (this.checkSignedInWithMessage()) {
+    var currentUser = this.auth.currentUser;
+    // Initialize PeerJs
+    this.peer = new Peer(currentUser.uid, {key: 'd83398ad-b951-45ed-8fc4-44464b10a697'});
+  }
+};
+
+FriendlyChat.prototype.endPeerJs = function() {
+  if (this.peer) {
+    this.peer.disconnect();
+    this.peer = null;
+  }
+};
+
+FriendlyChat.prototype.saveUser = function() {
+  if (this.checkSignedInWithMessage()) {
+    var currentUser = this.auth.currentUser;
+    // Reference to the /users/{:uid} database path.
+    this.userRef = this.database.ref('users/' + currentUser.uid);
+    this.userRef.onDisconnect().remove();
+    this.userRef.set({
+      name: currentUser.displayName,
+      email: currentUser.email,
+      photoUrl: currentUser.photoURL || '/images/profile_placeholder.png'
+    });
+  }
+};
+
+FriendlyChat.prototype.loadUsers = function() {
+  // Reference to the /users/ database path.
+  this.usersRef = this.database.ref('users');
+  // Make sure we remove all previous listeners.
+  this.usersRef.off();
+
+  // Loads users and listen for new ones.
+  var setUser = function(data) {
+    var val = data.val();
+    this.displayUser(data.key, val.name, val.photoUrl);
+  }.bind(this);
+  var unsetUser = function(data) {
+    this.reloadUsers();
+  }.bind(this);
+  this.usersRef.on('child_added', setUser);
+  this.usersRef.on('child_changed', setUser);
+  this.usersRef.on('child_removed', unsetUser);
+};
+
+FriendlyChat.prototype.reloadUsers = function() {
+  while (this.userList.firstChild) {
+    this.userList.removeChild(this.userList.firstChild);
+  }
+  this.loadUsers();
+};
+
+FriendlyChat.USER_TEMPLATE =
+    '<div class="mdl-list__item online-user-container">' +
+      '<span class="mdl-list__item-primary-content">' +
+        '<span class="pic"></span>' +
+        '<span class="name"></span>' +
+      '</span>' +
+      '<a class="mdl-list__item-secondary-action" href="#"><i class="material-icons">call</i></a>' +
+    '</div>';
+
+FriendlyChat.prototype.displayUser = function(key, name, picUrl) {
+  var div = document.getElementById(key);
+
+  if (!div) {
+    var container = document.createElement('div');
+    container.innerHTML = FriendlyChat.USER_TEMPLATE;
+    div = container.firstChild;
+    div.setAttribute('id', key);
+    this.userList.appendChild(div);
+  }
+  if (picUrl) {
+    div.querySelector('.pic').style.backgroundImage = 'url(' + picUrl + ')';
+  }
+  div.querySelector('.name').textContent = name;
+  // Show the card fading-in.
+  setTimeout(function() {div.classList.add('visible')}, 1);
 };
 
 window.onload = function() {
