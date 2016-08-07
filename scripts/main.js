@@ -15,6 +15,8 @@
  */
 'use strict';
 
+navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+
 // Initializes FriendlyChat.
 function FriendlyChat() {
   this.checkSetup();
@@ -196,14 +198,16 @@ FriendlyChat.prototype.onAuthStateChanged = function(user) {
     // We load currently existing chant messages.
     this.loadMessages();
 
-    // Initialize PeerJs.
-    this.initPeerJs();
+    this.initMeidaStream(function () {
+      // Initialize PeerJs.
+      this.initPeerJs();
 
-    // Save user.
-    this.saveUser();
+      // Save user.
+      this.saveUser();
 
-    // load current users.
-    this.loadUsers();
+      // load current users.
+      this.loadUsers();
+    }.bind(this));
   } else { // User is signed out!
     // Hide user's profile and sign-out button.
     this.userName.setAttribute('hidden', 'true');
@@ -215,6 +219,9 @@ FriendlyChat.prototype.onAuthStateChanged = function(user) {
 
     // End PeerJs
     this.endPeerJs();
+
+    // Clear users
+    this.clearUsers();
   }
 };
 
@@ -322,23 +329,9 @@ FriendlyChat.prototype.onOnlineState = function(snap) {
     data.message = 'disconnected';
     this.signInSnackbar.MaterialSnackbar.showSnackbar(data);
     this.endPeerJs();
+    this.clearUsers();
   }
   this.isOnline = snap.val();
-};
-
-FriendlyChat.prototype.initPeerJs = function() {
-  if (this.checkSignedInWithMessage()) {
-    var currentUser = this.auth.currentUser;
-    // Initialize PeerJs
-    this.peer = new Peer(currentUser.uid, {key: 'd83398ad-b951-45ed-8fc4-44464b10a697'});
-  }
-};
-
-FriendlyChat.prototype.endPeerJs = function() {
-  if (this.peer) {
-    this.peer.disconnect();
-    this.peer = null;
-  }
 };
 
 FriendlyChat.prototype.saveUser = function() {
@@ -350,7 +343,8 @@ FriendlyChat.prototype.saveUser = function() {
     this.userRef.set({
       name: currentUser.displayName,
       email: currentUser.email,
-      photoUrl: currentUser.photoURL || '/images/profile_placeholder.png'
+      photoUrl: currentUser.photoURL || '/images/profile_placeholder.png',
+      peerId: this.peerId || null
     });
   }
 };
@@ -364,7 +358,7 @@ FriendlyChat.prototype.loadUsers = function() {
   // Loads users and listen for new ones.
   var setUser = function(data) {
     var val = data.val();
-    this.displayUser(data.key, val.name, val.photoUrl);
+    this.displayUser(data.key, val.name, val.photoUrl, val.peerId);
   }.bind(this);
   var unsetUser = function(data) {
     this.reloadUsers();
@@ -375,10 +369,14 @@ FriendlyChat.prototype.loadUsers = function() {
 };
 
 FriendlyChat.prototype.reloadUsers = function() {
+  this.clearUsers();
+  this.loadUsers();
+};
+
+FriendlyChat.prototype.clearUsers = function() {
   while (this.userList.firstChild) {
     this.userList.removeChild(this.userList.firstChild);
   }
-  this.loadUsers();
 };
 
 FriendlyChat.USER_TEMPLATE =
@@ -387,25 +385,124 @@ FriendlyChat.USER_TEMPLATE =
         '<span class="pic"></span>' +
         '<span class="name"></span>' +
       '</span>' +
-      '<a class="mdl-list__item-secondary-action" href="#"><i class="material-icons">call</i></a>' +
+      '<a class="phone" class="mdl-list__item-secondary-action" href="#"><i class="material-icons">call</i></a>' +
     '</div>';
 
-FriendlyChat.prototype.displayUser = function(key, name, picUrl) {
-  var div = document.getElementById(key);
+FriendlyChat.prototype.displayUser = function(uid, name, picUrl, peerId) {
+  var div = document.getElementById(uid);
 
   if (!div) {
     var container = document.createElement('div');
     container.innerHTML = FriendlyChat.USER_TEMPLATE;
     div = container.firstChild;
-    div.setAttribute('id', key);
+    div.setAttribute('id', uid);
     this.userList.appendChild(div);
   }
   if (picUrl) {
     div.querySelector('.pic').style.backgroundImage = 'url(' + picUrl + ')';
   }
   div.querySelector('.name').textContent = name;
+
+  var currentUser = this.auth.currentUser;
+  var phoneBtn    = div.querySelector('.phone');
+  if (currentUser && currentUser.uid === uid) {
+    if (phoneBtn) {
+      phoneBtn.remove();
+    }
+  } else {
+    phoneBtn.setAttribute('id', peerId);
+    if (peerId) {
+      phoneBtn.addEventListener('click', function () {
+        this.callToUser(peerId);
+      }.bind(this));
+    }
+  }
+
   // Show the card fading-in.
   setTimeout(function() {div.classList.add('visible')}, 1);
+};
+
+FriendlyChat.prototype.initMeidaStream = function (cb) {
+  navigator.getUserMedia({audio: true, video: false}, function (stream) {
+    this.mediaStream = stream;
+    document.getElementById('myVideo').setAttribute('src', URL.createObjectURL(stream));
+    cb();
+  }.bind(this),
+  function (err) {
+    console.error(err);
+  }.bind(this));
+};
+
+FriendlyChat.prototype.initPeerJs = function() {
+  if (this.checkSignedInWithMessage()) {
+    var currentUser = this.auth.currentUser;
+    // Initialize PeerJs
+    this.peer = new Peer({key: 'd83398ad-b951-45ed-8fc4-44464b10a697'});
+    this.peer.on('open', function (peerId) {
+      this.peerId = peerId;
+      this.saveUser();
+    }.bind(this))
+    this.peer.on('call', this.reciveCall.bind(this));
+    this.peer.on('close', this.endPeerJs.bind(this));
+    this.peer.on('error', function (err) {
+      console.error(err);
+      this.endPeerJs();
+    }.bind(this));
+  }
+};
+
+FriendlyChat.prototype.endPeerJs = function() {
+  if (this.peer) {
+    this.peer.destroy();
+    this.peer = null;
+  }
+};
+
+FriendlyChat.prototype.callToUser = function(peerId) {
+  if (!this.mediaStream) {
+    return this.initMeidaStream(this.callToUser.bind(this));
+  }
+
+  if (!this.peer) {
+    this.initPeerJs();
+  }
+
+  this.endCall();
+
+  this.call = this.peer.call(peerId, this.mediaStream);
+
+  this.call.on('close', this.endCall.bind(this));
+  this.call.on('error', function (err) {
+    console.error(err);
+    this.endCall();
+  }.bind(this));
+};
+
+FriendlyChat.prototype.reciveCall = function (call) {
+  if (!this.mediaStream) {
+    return this.initMeidaStream(this.callToUser.bind(this));
+  }
+
+  this.endCall();
+
+  var fromId = call.peer;
+
+  this.call = call;
+  this.call.answer(this.mediaStream);
+  this.call.on('stream', function (stream) {
+    document.getElementById('peerVideo').setAttribute('src', URL.createObjectURL(stream));
+  }.bind(this));
+  this.call.on('error', function (err) {
+    console.error(err);
+    this.endCall();
+  }.bind(this));
+};
+
+FriendlyChat.prototype.endCall = function () {
+  if (this.call) {
+    this.call.close();
+    this.call = null;
+  }
 };
 
 window.onload = function() {
