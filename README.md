@@ -1,17 +1,5 @@
-# Firebase Codelab: FriendlyChat
+# Firebase: Build a Real Time Web Chat App Codelab - Start code
 
-This is the source code for the Firebase FriendlyChat codelab. It includes start and end versions of the
-code for Web, Android, Objective-C and Swift. To get started open the codelab instructions:
+This folder contains the starting code for the [Firebase: Build a Real Time Web Chat App Codelab](https://codelabs.developers.google.com/codelabs/firebase-web/).
 
- - [Web Codelab](https://codelabs.developers.google.com/codelabs/firebase-web/).
- - [Android Codelab](https://codelabs.developers.google.com/codelabs/firebase-android/).
- - [Swift Codelab](https://codelabs.developers.google.com/codelabs/firebase-ios-swift/).
- - [Objective-C Codelab](https://codelabs.developers.google.com/codelabs/firebase-ios-objc/).
-
-
-## How to make contributions?
-Please read and follow the steps in the [CONTRIBUTING.md](CONTRIBUTING.md)
-
-
-## License
-See [LICENSE](LICENSE)
+If you'd like to jump directly to the end and see the finished code head to the [web](../web) directory.
